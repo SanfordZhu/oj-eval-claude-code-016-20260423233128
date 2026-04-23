@@ -1,9 +1,12 @@
 #include <iostream>
-#include <cstdio>
 #include <vector>
 #include <string>
 #include <algorithm>
 #include <cstring>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 using namespace std;
 
@@ -21,48 +24,63 @@ struct PageHeader {
 };
 
 struct BPTree {
-    FILE* file;
+    int fd;
+    char* data;
+    size_t file_size;
     string filename;
     int root_page;
     int next_free_page;
 
     BPTree(const string& fname) : filename(fname) {
-        file = fopen(filename.c_str(), "rb+");
-        if (!file) {
-            file = fopen(filename.c_str(), "wb");
-            fclose(file);
-            file = fopen(filename.c_str(), "rb+");
+        fd = open(fname.c_str(), O_RDWR);
+        if (fd < 0) {
+            fd = open(fname.c_str(), O_RDWR | O_CREAT, 0644);
             root_page = 0;
             next_free_page = 1;
+            file_size = sizeof(root_page) + sizeof(next_free_page) + PAGE_SIZE;
+            ftruncate(fd, file_size);
+            data = (char*)mmap(nullptr, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
             write_header();
             create_root();
         } else {
+            struct stat st;
+            fstat(fd, &st);
+            file_size = st.st_size;
+            data = (char*)mmap(nullptr, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
             read_header();
         }
-        // Enable large buffering for file I/O for better speed
-        setvbuf(file, nullptr, _IOFBF, 1 << 20);
     }
 
     ~BPTree() {
-        fclose(file);
+        munmap(data, file_size);
+        close(fd);
+    }
+
+    void ensure_space() {
+        size_t needed = sizeof(root_page) + sizeof(next_free_page) + (size_t)(next_free_page) * PAGE_SIZE;
+        if (needed > file_size) {
+            munmap(data, file_size);
+            file_size = needed;
+            ftruncate(fd, file_size);
+            data = (char*)mmap(nullptr, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        }
     }
 
     void write_header() {
-        fseek(file, 0, SEEK_SET);
-        fwrite(&root_page, sizeof(root_page), 1, file);
-        fwrite(&next_free_page, sizeof(next_free_page), 1, file);
-        fflush(file);
+        memcpy(data + 0, &root_page, sizeof(root_page));
+        memcpy(data + sizeof(root_page), &next_free_page, sizeof(next_free_page));
+        msync(data, sizeof(root_page) + sizeof(next_free_page), MS_SYNC);
     }
 
     void read_header() {
-        fseek(file, 0, SEEK_SET);
-        fread(&root_page, sizeof(root_page), 1, file);
-        fread(&next_free_page, sizeof(next_free_page), 1, file);
+        memcpy(&root_page, data + 0, sizeof(root_page));
+        memcpy(&next_free_page, data + sizeof(root_page), sizeof(next_free_page));
     }
 
     int allocate_page() {
         int page = next_free_page++;
         write_header();
+        ensure_space();
         return page;
     }
 
@@ -82,35 +100,40 @@ struct BPTree {
 
     void read_page(int page_num, PageHeader& header, vector<string>& keys, vector<int>& values) {
         keys.clear();
-        values.clear();
-        fseek(file, sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE, SEEK_SET);
-        fread(&header, sizeof(header), 1, file);
+        char* page_start = data + sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE;
+        memcpy(&header, page_start, sizeof(header));
         if (header.num_keys > 0) {
             keys.reserve(header.num_keys);
             values.reserve(header.num_keys);
         }
-        char buf[MAX_KEY_SIZE + 1];
+        char* ptr = page_start + sizeof(header);
         for (int i = 0; i < header.num_keys; i++) {
-            fread(buf, MAX_KEY_SIZE, 1, file);
+            char buf[MAX_KEY_SIZE + 1];
+            memcpy(buf, ptr, MAX_KEY_SIZE);
             buf[MAX_KEY_SIZE] = '\0';
             keys.emplace_back(buf);
+            ptr += MAX_KEY_SIZE;
             int val;
-            fread(&val, sizeof(val), 1, file);
+            memcpy(&val, ptr, sizeof(val));
+            ptr += sizeof(val);
             values.push_back(val);
         }
     }
 
     void write_page(int page_num, PageHeader& header, const vector<string>& keys, const vector<int>& values) {
-        fseek(file, sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE, SEEK_SET);
-        fwrite(&header, sizeof(header), 1, file);
+        char* page_start = data + sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE;
+        memcpy(page_start, &header, sizeof(header));
+        char* ptr = page_start + sizeof(header);
         for (size_t i = 0; i < keys.size(); i++) {
             char buf[MAX_KEY_SIZE] = {0};
             strncpy(buf, keys[i].c_str(), MAX_KEY_SIZE);
-            fwrite(buf, MAX_KEY_SIZE, 1, file);
+            memcpy(ptr, buf, MAX_KEY_SIZE);
+            ptr += MAX_KEY_SIZE;
             int val = values[i];
-            fwrite(&val, sizeof(val), 1, file);
+            memcpy(ptr, &val, sizeof(val));
+            ptr += sizeof(val);
         }
-        fflush(file);
+        msync(page_start, PAGE_SIZE, MS_SYNC);
     }
 
     void write_page(int page_num, PageHeader& header) {
@@ -169,7 +192,6 @@ struct BPTree {
             }
         }
 
-        // Binary search for insertion position
         int left = 0, right = header.num_keys;
         while (left < right) {
             int mid = (left + right) / 2;
@@ -180,7 +202,6 @@ struct BPTree {
             }
         }
         int pos = left;
-        // For same key, find position by value
         while (pos < header.num_keys && compare(key, keys[pos]) == 0 && values[pos] < value) {
             pos++;
         }
@@ -422,7 +443,6 @@ int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
-    // Enable large buffer for stdio
     setvbuf(stdin, nullptr, _IOFBF, 1 << 20);
     setvbuf(stdout, nullptr, _IOFBF, 1 << 20);
 
