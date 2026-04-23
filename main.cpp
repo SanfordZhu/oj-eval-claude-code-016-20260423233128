@@ -127,11 +127,17 @@ struct BPTree {
         if (header.is_leaf) {
             return root;
         }
-        int pos = 0;
-        while (pos < header.num_keys && compare(key, keys[pos]) >= 0) {
-            pos++;
+        // Binary search for the first key greater than key
+        int left = 0, right = header.num_keys;
+        while (left < right) {
+            int mid = (left + right) / 2;
+            if (compare(key, keys[mid]) >= 0) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
         }
-        return find_leaf(children[pos], key);
+        return find_leaf(children[left], key);
     }
 
     bool insert_entry(const string& key, int value) {
@@ -382,7 +388,7 @@ struct BPTree {
             vector<string> next_keys;
             vector<int> next_values;
             read_page(header.next_leaf, next_header, next_keys, next_values);
-            if (compare(key, next_keys[0]) < 0) {
+            if (next_header.num_keys == 0 || compare(key, next_keys[0]) < 0) {
                 break;
             }
             current_page = header.next_leaf;
