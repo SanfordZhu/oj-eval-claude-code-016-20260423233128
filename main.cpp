@@ -8,7 +8,7 @@
 using namespace std;
 
 const int MAX_KEY_SIZE = 64;
-const int ORDER = 50;
+const int ORDER = 55;
 const int PAGE_SIZE = 4096;
 
 struct PageHeader {
@@ -39,6 +39,8 @@ struct BPTree {
         } else {
             read_header();
         }
+        // Enable large buffering for file I/O for better speed
+        setvbuf(file, nullptr, _IOFBF, 1 << 20);
     }
 
     ~BPTree() {
@@ -401,6 +403,10 @@ struct BPTree {
 int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
+
+    // Enable large buffer for stdio
+    setvbuf(stdin, nullptr, _IOFBF, 1 << 20);
+    setvbuf(stdout, nullptr, _IOFBF, 1 << 20);
 
     BPTree tree("bptree.db");
 
