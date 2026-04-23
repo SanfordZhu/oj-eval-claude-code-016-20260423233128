@@ -9,7 +9,7 @@
 using namespace std;
 
 const int MAX_KEY_SIZE = 64;
-const int ORDER = 100;
+const int ORDER = 58;
 const int PAGE_SIZE = 4096;
 
 struct PageHeader {
@@ -245,7 +245,7 @@ struct BPTree {
         PageHeader parent_header;
         vector<string> parent_keys;
         vector<int> parent_children;
-        int parent_page = get_page_header(left_page)->parent_page;
+        int parent_page = get_parent_page(left_page);
         read_page(parent_page, parent_header, parent_keys, parent_children);
 
         int pos = 0;
@@ -319,12 +319,12 @@ struct BPTree {
         insert_into_parent(old_page, split_key, new_page);
     }
 
-    PageHeader* get_page_header(int page_num) {
-        static PageHeader header;
+    int get_parent_page(int page_num) {
+        PageHeader header;
         vector<string> keys;
         vector<int> values;
         read_page(page_num, header, keys, values);
-        return &header;
+        return header.parent_page;
     }
 
     bool delete_entry(const string& key, int value) {
@@ -364,23 +364,20 @@ struct BPTree {
             vector<int> values;
             read_page(current_page, header, keys, values);
 
-            bool passed = false;
+            bool found_any = false;
             for (int i = 0; i < header.num_keys; i++) {
                 int cmp = compare(key, keys[i]);
                 if (cmp == 0) {
                     result.push_back(values[i]);
-                    passed = true;
+                    found_any = true;
                 } else if (cmp < 0) {
                     break;
-                } else {
-                    passed = true;
                 }
             }
 
-            if (!passed || header.next_leaf == -1) {
+            if (header.next_leaf == -1) {
                 break;
             }
-
             PageHeader next_header;
             vector<string> next_keys;
             vector<int> next_values;
@@ -391,9 +388,6 @@ struct BPTree {
             current_page = header.next_leaf;
         }
 
-        sort(result.begin(), result.end());
-        auto last = unique(result.begin(), result.end());
-        result.erase(last, result.end());
         return result;
     }
 };
