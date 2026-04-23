@@ -169,10 +169,18 @@ struct BPTree {
             }
         }
 
-        int pos = 0;
-        while (pos < header.num_keys && compare(key, keys[pos]) > 0) {
-            pos++;
+        // Binary search for insertion position
+        int left = 0, right = header.num_keys;
+        while (left < right) {
+            int mid = (left + right) / 2;
+            if (compare(key, keys[mid]) > 0) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
         }
+        int pos = left;
+        // For same key, find position by value
         while (pos < header.num_keys && compare(key, keys[pos]) == 0 && values[pos] < value) {
             pos++;
         }
@@ -270,10 +278,16 @@ struct BPTree {
         int parent_page = get_parent_page(left_page);
         read_page(parent_page, parent_header, parent_keys, parent_children);
 
-        int pos = 0;
-        while (pos < parent_header.num_keys && compare(key, parent_keys[pos]) > 0) {
-            pos++;
+        int left = 0, right = parent_header.num_keys;
+        while (left < right) {
+            int mid = (left + right) / 2;
+            if (compare(key, parent_keys[mid]) > 0) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
         }
+        int pos = left;
         parent_keys.insert(parent_keys.begin() + pos, key);
         parent_children.insert(parent_children.begin() + pos + 1, right_page);
         parent_header.num_keys++;
