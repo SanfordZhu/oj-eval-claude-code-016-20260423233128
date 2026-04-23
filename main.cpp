@@ -8,7 +8,7 @@
 using namespace std;
 
 const int MAX_KEY_SIZE = 64;
-const int ORDER = 58;
+const int ORDER = 59;
 const int PAGE_SIZE = 4096;
 
 struct PageHeader {
