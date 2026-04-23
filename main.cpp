@@ -8,7 +8,7 @@
 using namespace std;
 
 const int MAX_KEY_SIZE = 64;
-const int ORDER = 55;
+const int ORDER = 58;
 const int PAGE_SIZE = 4096;
 
 struct PageHeader {
@@ -85,11 +85,15 @@ struct BPTree {
         values.clear();
         fseek(file, sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE, SEEK_SET);
         fread(&header, sizeof(header), 1, file);
+        if (header.num_keys > 0) {
+            keys.reserve(header.num_keys);
+            values.reserve(header.num_keys);
+        }
+        char buf[MAX_KEY_SIZE + 1];
         for (int i = 0; i < header.num_keys; i++) {
-            char buf[MAX_KEY_SIZE + 1];
             fread(buf, MAX_KEY_SIZE, 1, file);
             buf[MAX_KEY_SIZE] = '\0';
-            keys.push_back(string(buf));
+            keys.emplace_back(buf);
             int val;
             fread(&val, sizeof(val), 1, file);
             values.push_back(val);
