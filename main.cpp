@@ -1,15 +1,14 @@
 #include <iostream>
-#include <fstream>
+#include <cstdio>
 #include <vector>
 #include <string>
 #include <algorithm>
 #include <cstring>
-#include <cstdint>
 
 using namespace std;
 
 const int MAX_KEY_SIZE = 64;
-const int ORDER = 30;
+const int ORDER = 50;
 const int PAGE_SIZE = 4096;
 
 struct PageHeader {
@@ -22,17 +21,17 @@ struct PageHeader {
 };
 
 struct BPTree {
-    fstream file;
+    FILE* file;
     string filename;
     int root_page;
     int next_free_page;
 
     BPTree(const string& fname) : filename(fname) {
-        file.open(filename, ios::in | ios::out | ios::binary);
-        if (!file.is_open()) {
-            file.open(filename, ios::out | ios::binary);
-            file.close();
-            file.open(filename, ios::in | ios::binary | ios::out);
+        file = fopen(filename.c_str(), "rb+");
+        if (!file) {
+            file = fopen(filename.c_str(), "wb");
+            fclose(file);
+            file = fopen(filename.c_str(), "rb+");
             root_page = 0;
             next_free_page = 1;
             write_header();
@@ -43,19 +42,20 @@ struct BPTree {
     }
 
     ~BPTree() {
-        file.close();
+        fclose(file);
     }
 
     void write_header() {
-        file.seekp(0, ios::beg);
-        file.write(reinterpret_cast<char*>(&root_page), sizeof(root_page));
-        file.write(reinterpret_cast<char*>(&next_free_page), sizeof(next_free_page));
+        fseek(file, 0, SEEK_SET);
+        fwrite(&root_page, sizeof(root_page), 1, file);
+        fwrite(&next_free_page, sizeof(next_free_page), 1, file);
+        fflush(file);
     }
 
     void read_header() {
-        file.seekg(0, ios::beg);
-        file.read(reinterpret_cast<char*>(&root_page), sizeof(root_page));
-        file.read(reinterpret_cast<char*>(&next_free_page), sizeof(next_free_page));
+        fseek(file, 0, SEEK_SET);
+        fread(&root_page, sizeof(root_page), 1, file);
+        fread(&next_free_page, sizeof(next_free_page), 1, file);
     }
 
     int allocate_page() {
@@ -81,30 +81,30 @@ struct BPTree {
     void read_page(int page_num, PageHeader& header, vector<string>& keys, vector<int>& values) {
         keys.clear();
         values.clear();
-        file.seekg(sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE, ios::beg);
-        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        fseek(file, sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE, SEEK_SET);
+        fread(&header, sizeof(header), 1, file);
         for (int i = 0; i < header.num_keys; i++) {
             char buf[MAX_KEY_SIZE + 1];
-            file.read(buf, MAX_KEY_SIZE);
+            fread(buf, MAX_KEY_SIZE, 1, file);
             buf[MAX_KEY_SIZE] = '\0';
             keys.push_back(string(buf));
             int val;
-            file.read(reinterpret_cast<char*>(&val), sizeof(val));
+            fread(&val, sizeof(val), 1, file);
             values.push_back(val);
         }
     }
 
     void write_page(int page_num, PageHeader& header, const vector<string>& keys, const vector<int>& values) {
-        file.seekp(sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE, ios::beg);
-        file.write(reinterpret_cast<char*>(&header), sizeof(header));
+        fseek(file, sizeof(root_page) + sizeof(next_free_page) + page_num * PAGE_SIZE, SEEK_SET);
+        fwrite(&header, sizeof(header), 1, file);
         for (size_t i = 0; i < keys.size(); i++) {
             char buf[MAX_KEY_SIZE] = {0};
             strncpy(buf, keys[i].c_str(), MAX_KEY_SIZE);
-            file.write(buf, MAX_KEY_SIZE);
+            fwrite(buf, MAX_KEY_SIZE, 1, file);
             int val = values[i];
-            file.write(reinterpret_cast<char*>(&val), sizeof(val));
+            fwrite(&val, sizeof(val), 1, file);
         }
-        file.flush();
+        fflush(file);
     }
 
     void write_page(int page_num, PageHeader& header) {
@@ -120,24 +120,34 @@ struct BPTree {
     }
 
     int find_leaf(int root, const string& key) {
+        int current = root;
+        while (true) {
+            PageHeader header;
+            vector<string> keys;
+            vector<int> children;
+            read_page(current, header, keys, children);
+            if (header.is_leaf) {
+                return current;
+            }
+            int left = 0, right = header.num_keys;
+            while (left < right) {
+                int mid = (left + right) / 2;
+                if (compare(key, keys[mid]) >= 0) {
+                    left = mid + 1;
+                } else {
+                    right = mid;
+                }
+            }
+            current = children[left];
+        }
+    }
+
+    int get_parent_page(int page_num) {
         PageHeader header;
         vector<string> keys;
-        vector<int> children;
-        read_page(root, header, keys, children);
-        if (header.is_leaf) {
-            return root;
-        }
-        // Binary search for the first key greater than key
-        int left = 0, right = header.num_keys;
-        while (left < right) {
-            int mid = (left + right) / 2;
-            if (compare(key, keys[mid]) >= 0) {
-                left = mid + 1;
-            } else {
-                right = mid;
-            }
-        }
-        return find_leaf(children[left], key);
+        vector<int> values;
+        read_page(page_num, header, keys, values);
+        return header.parent_page;
     }
 
     bool insert_entry(const string& key, int value) {
@@ -323,14 +333,6 @@ struct BPTree {
         write_page(new_page, new_header, new_keys, new_children);
 
         insert_into_parent(old_page, split_key, new_page);
-    }
-
-    int get_parent_page(int page_num) {
-        PageHeader header;
-        vector<string> keys;
-        vector<int> values;
-        read_page(page_num, header, keys, values);
-        return header.parent_page;
     }
 
     bool delete_entry(const string& key, int value) {
