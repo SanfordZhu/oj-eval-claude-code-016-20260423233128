@@ -9,7 +9,7 @@
 using namespace std;
 
 const int MAX_KEY_SIZE = 64;
-const int ORDER = 58;
+const int ORDER = 40;
 const int PAGE_SIZE = 4096;
 
 struct PageHeader {
@@ -305,7 +305,7 @@ struct BPTree {
             new_children.push_back(old_children[i]);
         }
 
-        for (int i = 0; i < new_children.size(); i++) {
+        for (size_t i = 0; i < new_children.size(); i++) {
             PageHeader child_header;
             vector<string> child_keys;
             vector<int> child_values;
@@ -370,12 +370,10 @@ struct BPTree {
             vector<int> values;
             read_page(current_page, header, keys, values);
 
-            bool found_any = false;
             for (int i = 0; i < header.num_keys; i++) {
                 int cmp = compare(key, keys[i]);
                 if (cmp == 0) {
                     result.push_back(values[i]);
-                    found_any = true;
                 } else if (cmp < 0) {
                     break;
                 }
